@@ -1,0 +1,50 @@
+name: Create Release and Upload Asset
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Run MAC database completer script
+      run: python update_mac_database.py
+
+    - name: Delete all existing releases and tags
+      run: |
+        gh release list --limit 1000 --json tagName -q '.[].tagName' | while read -r tag; do
+          if [ -n "$tag" ]; then
+            echo "Deleting release and tag: $tag"
+            gh release delete "$tag" --yes --cleanup-tag
+          fi
+        done
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Generate release tag
+      id: generate_tag
+      run: echo "RELEASE_TAG=v$(date +%Y%m%d-%H%M%S)" >> $GITHUB_ENV
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ env.RELEASE_TAG }}
+        name: Release ${{ env.RELEASE_TAG }}
+        files: macaddress.io-db-enhanced.xml
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
