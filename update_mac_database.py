@@ -10,6 +10,7 @@ import requests
 import csv
 import xml.etree.ElementTree as ET
 import os
+import argparse
 
 # 数据源URL
 MACADDRESS_IO_DB_URL = "https://macaddress.io/database/macaddress.io-db.xml"
@@ -24,12 +25,20 @@ IEEE_OUI_URLS = [
 DATA_DIR = "data"
 OUTPUT_FILENAME = "macaddress.io-db-enhanced.xml"
 
-def download_file(url, dest_folder):
+def download_file(url, dest_folder, noupdate=False):
     """从URL下载文件并保存到指定文件夹"""
     os.makedirs(dest_folder, exist_ok=True)
     local_filename = os.path.join(dest_folder, url.split('/')[-1])
+
+    if noupdate and os.path.exists(local_filename):
+        print(f"文件 {local_filename} 已存在，跳过下载。")
+        return local_filename
+
     print(f"正在下载 {url} 到 {local_filename}...")
-    with requests.get(url, stream=True) as r:
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    with requests.get(url, stream=True, headers=headers) as r:
         r.raise_for_status()
         with open(local_filename, 'wb') as f:
             for chunk in r.iter_content(chunk_size=8192):
@@ -107,36 +116,63 @@ def enhance_mac_database(xml_filepath, oui_mapping):
     tree = ET.parse(xml_filepath)
     root = tree.getroot()
     
+    print(f"XML根标签: {root.tag}")
+    
     enhanced_count = 0
     total_records = 0
 
-    for record in root.findall(".//vendor"):
+    # 假设 <vendor> 标签可能嵌套在 <record> 标签内
+    for record_element in root.findall(".//record"):
         total_records += 1
-        # 检查厂商信息是否为 "macaddress.io"
-        if record.text and record.text.strip().lower() == "macaddress.io":
-            # 获取父节点，即 <record> 元素
-            parent_record = record.find("..")
-            if parent_record is not None:
-                oui_element = parent_record.find("oui")
+        vendor_element = record_element.find("companyName") # 更改为 companyName
+        oui_element = record_element.find("oui")
+        company_address_element = record_element.find("companyAddress") # 添加 companyAddress
+
+        if vendor_element is not None and vendor_element.text:
+            vendor_text_lower = vendor_element.text.strip().lower()
+            
+            # 调试打印
+            # print(f"原始厂商名: '{vendor_element.text}'")
+            # print(f"处理后厂商名: '{vendor_text_lower}'")
+
+            if vendor_text_lower == "redacted_in_free_version_contact_support@macaddress.io":
                 if oui_element is not None and oui_element.text:
                     oui = oui_element.text.strip().replace(':', '').upper()
+                    # 调试打印
+                    # print(f"原始OUI: '{oui_element.text}'")
+                    # print(f"处理后OUI: '{oui}'")
+                    # print(f"OUI '{oui}' 是否在映射中: {oui in oui_mapping}")
+
                     if oui in oui_mapping:
                         new_vendor_name = oui_mapping[oui]
-                        record.text = new_vendor_name
+                        vendor_element.text = new_vendor_name
                         enhanced_count += 1
-                        # print(f"补全OUI {oui}，从 'macaddress.io' 更改为 '{new_vendor_name}'")
+                        # print(f"补全OUI {oui}，从 'REDACTED...' 更改为 '{new_vendor_name}'")
+                    
+                    # 检查并补全 companyAddress
+                    if company_address_element is not None and \
+                       company_address_element.text and \
+                       company_address_element.text.strip().lower() == "redacted_in_free_version_contact_support@macaddress.io":
+                        if oui in oui_mapping:
+                            company_address_element.text = oui_mapping[oui] + " (Derived from OUI)" # 简单填充
+                            # print(f"补全地址 for OUI {oui}")
     
     print(f"XML文件解析完成。总记录数: {total_records}，补全厂商信息数: {enhanced_count}")
     return tree
 
 def main():
+    parser = argparse.ArgumentParser(description="MAC地址数据库补全器")
+    parser.add_argument("--noupdate", action="store_true",
+                        help="如果数据文件已存在，则跳过下载。")
+    args = parser.parse_args()
+
     print("MAC地址数据库补全器开始运行...")
 
     # 1. 下载数据文件
     print("\n--- 正在下载数据文件 ---")
-    download_file(MACADDRESS_IO_DB_URL, DATA_DIR)
+    download_file(MACADDRESS_IO_DB_URL, DATA_DIR, args.noupdate)
     for url in IEEE_OUI_URLS:
-        download_file(url, DATA_DIR)
+        download_file(url, DATA_DIR, args.noupdate)
 
     # 2. 加载IEEE OUI数据
     print("\n--- 正在加载IEEE OUI数据 ---")
