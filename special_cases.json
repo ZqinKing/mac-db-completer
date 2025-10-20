@@ -22,6 +22,7 @@
   "Broadcom Corporation": "Broadcom",
   "NETGEAR": "NETGEAR",
   "ASUSTek COMPUTER INC.": "ASUS",
+  "Asus Network Technologies, Inc.": "ASUS",
   "LG Electronics": "LG",
   "Sony Corporation": "Sony",
   "Xiaomi Communications Co Ltd": "Xiaomi",
@@ -940,5 +941,13 @@
   "New H3C Technologies Co., Ltd": "H3C",
   "Hangzhou H3C Technologies Co., Limited": "H3C",
   "Hangzhou Hikvision Digital Technology Co.,Ltd.": "Hikvision",
-  "Prama Hikvision India Private Limited": "Hikvision"
+  "Prama Hikvision India Private Limited": "Hikvision",
+  "Ruijie Networks Co.,LTD": "Ruijie",
+  "Shanghai Ruijie Technology": "Ruijie",
+  "Tenda Technology Co.,Ltd.Dongguan branch": "Tenda",
+  "Tenda Technology Co., Ltd.": "Tenda",
+  "SHEN ZHEN TENDA TECHNOLOGY CO.,LTD": "Tenda",
+  "Zhejiang Dahua Technology Co., Ltd.": "Dahua",
+  "ZHEJIANG DAHUA TECHNOLOGYCO.,LTD": "Dahua",
+  "Shanghai Dahua Scale Factory": "Dahua"
 }
