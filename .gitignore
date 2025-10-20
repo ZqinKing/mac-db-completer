@@ -24,3 +24,4 @@ data/
 .DS_Store
 .Trashes
 Thumbs.db
+update_company_info.py

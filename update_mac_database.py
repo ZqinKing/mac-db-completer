@@ -1,4 +1,19 @@
 # -*- coding: utf-8 -*-
+#
+# Copyright (C) 2025 ZqinKing <ZqinKing23@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 MAC地址数据库补全器
 
@@ -11,6 +26,8 @@ import csv
 import xml.etree.ElementTree as ET
 import os
 import argparse
+import json
+import re
 
 # 数据源URL
 MACADDRESS_IO_DB_URL = "https://macaddress.io/database/macaddress.io-db.xml"
@@ -24,6 +41,126 @@ IEEE_OUI_URLS = [
 
 DATA_DIR = "data"
 OUTPUT_FILENAME = "macaddress.io-db-enhanced.xml"
+SPECIAL_CASES_FILE = "special_cases.json"
+
+# These are applied after punctuation has been removed.
+# More examples at https://en.wikipedia.org/wiki/Incorporation_(business)
+general_terms = '|'.join([
+    ' a +s\\\\b', # A/S and A.S. but not "As" as in "Connect As".
+    ' ab\\\\b', # Also follows "Oy", which is covered below.
+    ' ag\\\\b',
+    ' b ?v\\\\b',
+    ' closed joint stock company\\\\b',
+    ' co\\\\b',
+    ' company\\\\b',
+    ' corp\\\\b',
+    ' corporation\\\\b',
+    ' corporate\\\\b',
+    ' de c ?v\\\\b', # Follows "S.A.", which is covered separately below.
+    ' gmbh\\\\b',
+    ' holding\\\\b',
+    ' inc\\\\b',
+    ' incorporated\\\\b',
+    ' jsc\\\\b',
+    ' k k\\\\b', # "K.K." as in "kabushiki kaisha", but not "K+K" as in "K+K Messtechnik".
+    ' limited\\\\b',
+    ' llc\\\\b',
+    ' ltd\\\\b',
+    ' n ?v\\\\b',
+    ' oao\\\\b',
+    ' of\\\\b',
+    ' open joint stock company\\\\b',
+    ' ooo\\\\b',
+    ' oü\\\\b',
+    ' oy\\\\b',
+    ' oyj\\\\b',
+    ' plc\\\\b',
+    ' pty\\\\b',
+    ' pvt\\\\b',
+    ' s ?a ?r ?l\\\\b',
+    ' s ?a\\\\b',
+    ' s ?p ?a\\\\b',
+    ' sp ?k\\\\b',
+    ' s ?r ?l\\\\b',
+    ' systems\\\\b',
+    '\\\\bthe\\\\b',
+    ' zao\\\\b',
+    ' z ?o ?o\\\\b',
+    ' l\\\\b' # Added to handle cases like "i-PRO Co L"
+    ])
+
+# Chinese company names tend to start with the location, skip it (non-exhaustive list).
+skip_start = [
+    'shengzen',
+    'shenzhen',
+    'beijing',
+    'shanghai',
+    'wuhan',
+    'hangzhou',
+    'guangxi',
+    'guangdong',
+    'chengdu',
+    'chongqing',
+    'zhejiang'
+]
+
+def load_special_cases(filepath):
+    """加载特殊厂商名称映射表"""
+    if not os.path.exists(filepath):
+        print(f"警告: 特殊厂商映射文件 {filepath} 不存在，将使用空映射。")
+        return {}
+    with open(filepath, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def simplify_company_name(manuf, special_cases):
+    """简化厂商名称"""
+    # 1. 检查特殊情况
+    if manuf in special_cases:
+        return special_cases[manuf]
+
+    # 2. 标准化空白字符
+    manuf = ' '.join(manuf.split())
+    orig_manuf = manuf
+
+    # 3. 处理大小写 (全大写转为首字母大写)
+    if manuf.isupper():
+        manuf = manuf.title()
+
+    # 4. 移除括号内容
+    manuf = re.sub(r"\\(.*?\\)", '', manuf) # 英文括号
+    manuf = re.sub(r"（.*?）", '', manuf) # 全角括号
+
+    # 5. 移除 " a " (例如 "Aruba, a Hewlett [...]")
+    manuf = manuf.replace(" a ", " ")
+
+    # 6. 移除标点符号 (保留连字符)
+    # 注意：这里移除了 make-manuf.py 中移除的 '/' 和 '&'，因为它们通常不是连字符
+    manuf = re.sub(r"[\"',.:()+]", ' ', manuf)
+    manuf = re.sub(r"[«»“”]", ' ', manuf) # 双角括号和引号
+
+    # 7. 移除通用公司后缀
+    plain_manuf = re.sub(general_terms, ' ', manuf, flags=re.IGNORECASE) # 将匹配到的后缀替换为空格
+    if plain_manuf: # 如果清理后不为空，则更新厂商名称
+        manuf = plain_manuf
+
+    # 8. 移除地名
+    split = manuf.split()
+    if len(split) > 1 and split[0].lower() in skip_start:
+        manuf = ' '.join(split[1:])
+
+    # 9. 在所有简化完成后，统一进行空格处理
+    manuf = ' '.join(manuf.split())
+
+    # 10. 移除截断逻辑 (根据用户反馈，当前项目不需要此功能)
+    # trunc_len = 12
+    # if len(manuf) > trunc_len:
+    #     manuf = manuf[:trunc_len]
+
+    if len(manuf) < 1:
+        # 如果简化后为空，则返回原始名称或一个默认值
+        return orig_manuf if orig_manuf else "UNKNOWN"
+
+    return manuf
 
 def download_file(url, dest_folder, noupdate=False):
     """从URL下载文件并保存到指定文件夹"""
@@ -46,7 +183,7 @@ def download_file(url, dest_folder, noupdate=False):
     print(f"下载完成: {local_filename}")
     return local_filename
 
-def load_ieee_oui_data(data_folder):
+def load_ieee_oui_data(data_folder, special_cases):
     """加载IEEE OUI数据并构建OUI到厂商名称的映射"""
     oui_mapping = {}
     for url in IEEE_OUI_URLS:
@@ -58,10 +195,10 @@ def load_ieee_oui_data(data_folder):
         print(f"正在加载IEEE OUI数据从 {filename}...")
         with open(filename, 'r', encoding='utf-8', errors='ignore') as f:
             reader = csv.reader(f)
-            # 假设CSV文件格式为：Registry,Assignment,Organization Name,Organization Address
-            # 我们主要关心 Assignment (OUI) 和 Organization Name
-            # 需要跳过头部行，并根据实际CSV内容调整索引
             header_skipped = False
+            oui_idx = -1
+            org_name_idx = -1
+
             for row in reader:
                 if not header_skipped:
                     # 尝试找到包含 "Assignment" 和 "Organization Name" 的行作为头部
@@ -77,9 +214,6 @@ def load_ieee_oui_data(data_folder):
                         header_skipped = True
                         continue
                     elif len(row) >= 2 and row.strip().upper() == "REGISTRY": # cid.csv, iab.csv, mam.csv, oui36.csv
-                        # 这些文件可能没有明确的"Assignment"列，而是直接OUI在第一列
-                        # 需要更灵活的解析，或者根据文件类型单独处理
-                        # 暂时先假设OUI在第二列，厂商名在第三列
                         if "OUI" in row and "Organization" in row:
                             oui_idx = row.index("OUI")
                             org_name_idx = row.index("Organization")
@@ -95,16 +229,16 @@ def load_ieee_oui_data(data_folder):
                             org_name_idx = row.index("Vendor")
                             header_skipped = True
                             continue
-                    # 如果以上都没有匹配，则尝试跳过第一行，并使用固定索引
                     print(f"无法自动识别 {filename} 的CSV头部，尝试跳过第一行并使用默认索引。")
                     header_skipped = True
-                    continue # 跳过当前行，继续处理下一行数据
+                    continue
 
-                if len(row) > max(oui_idx, org_name_idx):
+                if oui_idx != -1 and org_name_idx != -1 and len(row) > max(oui_idx, org_name_idx):
                     oui = row[oui_idx].strip().replace('-', '').upper()
                     org_name = row[org_name_idx].strip()
                     if oui and org_name:
-                        oui_mapping[oui] = org_name
+                        simplified_name = simplify_company_name(org_name, special_cases)
+                        oui_mapping[oui] = simplified_name
     print(f"加载完成，共 {len(oui_mapping)} 条OUI映射。")
     return oui_mapping
 
@@ -176,7 +310,8 @@ def main():
 
     # 2. 加载IEEE OUI数据
     print("\n--- 正在加载IEEE OUI数据 ---")
-    oui_mapping = load_ieee_oui_data(DATA_DIR)
+    special_cases = load_special_cases(SPECIAL_CASES_FILE)
+    oui_mapping = load_ieee_oui_data(DATA_DIR, special_cases)
 
     # 3. 补全macaddress.io数据库
     print("\n--- 正在补全MAC地址数据库 ---")
